@@ -16,10 +16,13 @@ import (
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 	"k8s.io/klog/v2"
+	drahealthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 )
 
-// Driver implements the DRA kubelet plugin callbacks.
+// Driver implements the DRA kubelet plugin callbacks and the DRAResourceHealth
+// service (registered automatically by kubeletplugin).
 type Driver struct {
+	drahealthv1alpha1.UnimplementedDRAResourceHealthServer
 	state *DeviceState
 }
 
@@ -156,6 +159,12 @@ func requestCapacityFor(claim *resourceapi.ResourceClaim, requestName string, al
 func PublishResources(ctx context.Context, helper *kubeletplugin.Helper, state *DeviceState, nodeName string) error {
 	var resourceSlice resourceslice.Slice
 	for _, device := range state.allocatable {
+		// Unhealthy cards stay unpublished (no new allocations) until the health
+		// monitor marks them Healthy again; prepared claims are unaffected.
+		if state.IsDeviceUnhealthy(device.Name) {
+			klog.Warningf("skip publishing unhealthy device %s", device.Name)
+			continue
+		}
 		resourceSlice.Devices = append(resourceSlice.Devices, device.GetDevice())
 	}
 

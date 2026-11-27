@@ -37,6 +37,9 @@ func main() {
 	if err := driver.InitDeviceSplitCountFromEnv(); err != nil {
 		klog.Fatalf("%v", err)
 	}
+	if err := driver.InitDeviceMonitorFromEnv(); err != nil {
+		klog.Fatalf("%v", err)
+	}
 	flag.Parse()
 
 	nodeName := getenvDefault("NODE_NAME", "")
@@ -107,9 +110,36 @@ func main() {
 		klog.Fatalf("refresh allocatable after orphan cleanup: %v", err)
 	}
 
+	// Sample device health once before the first publish so a broken card is
+	// never advertised; a failed round is non-fatal (verdicts stay Unknown).
+	if err := state.RefreshDeviceHealth(); err != nil {
+		klog.Warningf("initial refresh device health: %v", err)
+	}
+
 	if err := driver.PublishResources(ctx, plugin, state, nodeName); err != nil {
 		klog.Fatalf("publish resources: %v", err)
 	}
+
+	// Sample device health on its own (shorter) ticker: unhealthy cards must be
+	// pulled from ResourceSlice within seconds, not on the 2-minute cleanup cycle.
+	// Republish afterwards so health transitions take effect promptly.
+	go func() {
+		ticker := time.NewTicker(time.Duration(driver.DeviceMonitorIntervalSec) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := state.RefreshDeviceHealth(); err != nil {
+					klog.Warningf("periodic refresh device health: %v", err)
+				}
+				if err := driver.PublishResources(ctx, plugin, state, nodeName); err != nil {
+					klog.Warningf("periodic publish resources after health refresh: %v", err)
+				}
+			}
+		}
+	}()
 
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)

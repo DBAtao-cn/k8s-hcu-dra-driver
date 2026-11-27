@@ -18,6 +18,8 @@ Hygon HCU DRA Driver 是一个 Kubernetes Dynamic Resource Allocation (DRA) Kube
 
 •**状态持久化与清理****：**驱动重启后恢复已 Prepare 的 Claim；定期清理无对应 Pod 的残留 vHCU；
 
+•**设备监控状态管理****：**周期性采集每卡温度、功耗、显存、利用率并评估健康状态；不健康设备自动从 ResourceSlice 摘除（已分配 Claim 不受影响）、恢复后自动重新发布，同时通过 DRAResourceHealth 服务向 kubelet 上报设备健康变化；
+
 ## 4.2 安装部署
 
 本文档涉及的yaml文件可以从社区资源中心进行下载，镜像可以从光源镜像仓库直接拉取。
@@ -167,4 +169,36 @@ spec:
           hygon.com/hcumem: "10240"
 ```
 
-# 
+
+## 4.4 设备监控状态管理
+
+驱动以可配置周期（默认 30s）通过 DCGM 采集每张物理 HCU 的监控指标（板卡温度、平均功耗、显存用量、算力利用率），并在节点本地维护每张卡的健康状态（Healthy / Unhealthy / Unknown）。
+
+### 4.4.1 健康判定规则
+
+•连续 3 次指标采集失败（卡离线或驱动异常）判定为 Unhealthy；
+
+•板卡温度达到阈值（默认 105℃）判定为 Unhealthy；
+
+•其余情况判定为 Healthy；首次采集前为 Unknown（Unknown 不会被摘除，避免重启抖动）。
+
+### 4.4.2 不健康设备的处理
+
+•**暂停新调度**：Unhealthy 设备立即从 ResourceSlice 中摘除，调度器不会再向其分配新的 Claim；恢复健康后由下一采集周期自动重新发布；
+
+•**存量业务不受影响**：已 Prepare 的 Claim 与 vHCU 不做任何处置，仅在驱动日志中记录告警；
+
+•**上报 kubelet**：驱动实现了 DRAResourceHealth gRPC 服务（Kubernetes 1.34+ alpha，KEP-4680，需在 kube-apiserver 与 kubelet 上开启 `ResourceHealthStatus` 特性门控），健康变化实时推送给 kubelet，最终由 kubelet 填充到 Pod 的 `containerStatuses[].allocatedResourcesStatus` 字段（可通过 `kubectl describe pod` 查看）。
+
+### 4.4.3 相关配置
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| DEVICE_MONITOR_INTERVAL_SECONDS | 30 | 健康采样周期（秒） |
+| DEVICE_MONITOR_MAX_TEMP_C | 105 | 判定不健康的板卡温度阈值（℃） |
+
+驱动日志中会输出健康状态迁移记录，例如：
+
+```
+I1105 device health changed: device=hcu-0000-3d-00-0 dvInd=0 Healthy -> Unhealthy (temp=108.5C util=97% memUsed=5120MiB)
+```

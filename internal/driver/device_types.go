@@ -19,9 +19,19 @@ type DeviceStateOptions struct {
 	Clientset  kubernetes.Interface
 }
 
-// DeviceState holds node-local state: allocatable devices and CDI base spec settings.
+// DeviceState holds node-local state: allocatable devices, device health and
+// CDI base spec settings.
 type DeviceState struct {
 	allocatable map[string]*AllocatableDevice
+
+	// health tracks the latest monitor snapshot per allocatable device name.
+	// It is transient (not persisted): rebuilt by the first sampling round
+	// after a restart.
+	health map[string]*DeviceHealthInfo
+
+	// healthCh is buffered(1) and receives a hint on any health transition;
+	// the DRA health gRPC stream selects on it.
+	healthCh chan struct{}
 
 	cdiRoot   string
 	cdiVendor string

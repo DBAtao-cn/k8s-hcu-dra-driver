@@ -104,6 +104,11 @@ spec:
             # max vHCUs per physical HCU (capacity.slices)
             - name: DEVICE_SPLIT_COUNT
               value: "4"
+            # device health monitor: sampling interval (s) and unhealthy temperature threshold (C)
+            - name: DEVICE_MONITOR_INTERVAL_SECONDS
+              value: "30"
+            - name: DEVICE_MONITOR_MAX_TEMP_C
+              value: "105"
           volumeMounts:
             - name: plugins-registry
               mountPath: /var/lib/kubelet/plugins_registry

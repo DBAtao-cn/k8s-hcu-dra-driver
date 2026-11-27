@@ -56,6 +56,8 @@ func NewDeviceState(ctx context.Context, opts DeviceStateOptions) (*DeviceState,
 
 	state := &DeviceState{
 		allocatable: allocatable,
+		health:      make(map[string]*DeviceHealthInfo),
+		healthCh:    make(chan struct{}, 1),
 		cdiRoot:     opts.CDIRoot,
 		cdiVendor:   opts.DriverName,
 		nodeName:    opts.NodeName,
